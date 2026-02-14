@@ -1,12 +1,9 @@
 // =====================
-// НАСТРОЙКИ
+// НАСТРОЙКИ / ТЕКСТЫ
 // =====================
-const TILE = 40;
-const HUD_H = 70;
-
 const GREETING_TEXT = "Это специально игра созданная для вас персонально! Приятной игры!";
-const FROM_ME_TEXT = "Сообщение от меня: ты очень важный человек 💗";
-const WISH_TEXT = "Пусть у тебя будет много радости, тепла и улыбок ❤️";
+const FROM_ME_TEXT  = "Сообщение от меня: ты очень важный человек 💗";
+const WISH_TEXT     = "Пусть у тебя будет много радости, тепла и улыбок ❤️";
 
 const BG = [255, 240, 247];
 const WALL = [255, 214, 229];
@@ -15,108 +12,345 @@ const HEART_MAIN = [255, 120, 170];
 const HEART_LIGHT = [255, 175, 205];
 const LETTER_EDGE = [160, 110, 135];
 
+const DOOR_FILL = [255, 200, 230];
+const DOOR_LOCK = [160, 110, 135];
+
+// ВАЖНО: препятствия внутри уровня обозначены 'X'
+// Дверь обозначена 'D' (закрыта пока не собраны все сердечки)
 const LEVEL = [
   "#########################",
-  "#.......................#",
-  "#....####.....####......#",
-  "#....#..#.....#..#......#",
-  "#..P.#..#.....#..#......#",
-  "#....#..#.....#..#......#",
-  "#....####.....####......#",
-  "#.......................#",
+  "#....X....X.....X.......#",
+  "#....####.....####..X...#",
+  "#....#..#..X..#..#......#",
+  "#..P.#..#.....#..#..D...#",
+  "#....#..#..X..#..#......#",
+  "#..X.####.....####..X...#",
+  "#..........X..........X.#",
   "#########################",
 ];
 
-const W = LEVEL[0].length * TILE;
-const H = LEVEL.length * TILE + HUD_H;
+let TILE = 40;         // базовый размер клетки (потом подстроим под экран)
+let HUD_H = 70;
+
+let canvasW = 0;
+let canvasH = 0;
 
 let state = "welcome"; // welcome | game | letter
 
-let walls = new Set();
-let emptyCells = [];
+let walls = new Set();     // '#'
+let blocks = new Set();    // 'X' доп. препятствия
+let doorPos = null;        // 'D'
 let playerStart = null;
 
-let hearts = new Set();
+let hearts = new Set();    // рандомные сердечки
 let collected = new Set();
-let heartCount = 3;
+
+let heartCount = 3;        // сколько сердечек собирать
+let letterPos = null;      // письмо за дверью
 
 let player = {x:0, y:0, runningUntil:0};
-
-let letterPos = null;
 let startMillis = 0;
 
-// Картинки
+let stars = [];
+
 let imgIdle, imgRun, imgChar2;
 
 function preload(){
-  // Положи эти файлы рядом с index.html
-  imgIdle = loadImage("player.png");
-  imgRun  = loadImage("player_run.png");
+  // Положи рядом с index.html
+  imgIdle  = loadImage("player.png");
+  imgRun   = loadImage("player_run.png");
   imgChar2 = loadImage("char2.png");
 }
 
 function setup(){
-  createCanvas(W, H);
+  // адаптивный canvas по размеру окна
+  computeLayout();
+  const c = createCanvas(canvasW, canvasH);
+  c.parent("game");
+
   textFont("Arial");
+  stars = makeStars(120);
+
   parseLevel();
-  resetNewEntry(); // чтобы при старте уже было "по-новому"
+  newEntryStart(); // при каждом заходе в игру будет новый расклад
+
+  // Экспортируем командный интерфейс для HTML-консоли
+  window.gameCmd = (cmd) => handleConsoleCommand(cmd);
+  logLine("Готово. Введите команду или нажмите ENTER/SPACE для старта.");
+}
+
+function windowResized(){
+  computeLayout();
+  resizeCanvas(canvasW, canvasH);
+}
+
+function computeLayout(){
+  // Хотим, чтобы весь уровень помещался по ширине/высоте экрана
+  const cols = LEVEL[0].length;
+  const rows = LEVEL.length;
+
+  const pad = 16;
+  const maxW = windowWidth - pad;
+  const maxH = windowHeight - pad - 180; // место под консоль снизу
+
+  const tileByW = Math.floor(maxW / cols);
+  const tileByH = Math.floor((maxH) / rows);
+
+  TILE = constrain(Math.min(tileByW, tileByH), 26, 52);
+
+  canvasW = cols * TILE;
+  canvasH = rows * TILE + HUD_H;
+}
+
+function makeStars(n){
+  let arr = [];
+  for(let i=0;i<n;i++){
+    arr.push({
+      x: random(0, 1),
+      y: random(0, 1),
+      r: random([1,2]),
+      phase: random(0, TWO_PI)
+    });
+  }
+  return arr;
 }
 
 function parseLevel(){
   walls.clear?.();
+  blocks.clear?.();
   walls = new Set();
-  emptyCells = [];
+  blocks = new Set();
   playerStart = null;
+  doorPos = null;
 
   for(let y=0;y<LEVEL.length;y++){
     for(let x=0;x<LEVEL[0].length;x++){
       const ch = LEVEL[y][x];
       if(ch === "#") walls.add(`${x},${y}`);
-      else emptyCells.push([x,y]);
+      if(ch === "X") blocks.add(`${x},${y}`);
       if(ch === "P") playerStart = [x,y];
+      if(ch === "D") doorPos = [x,y];
     }
   }
+
+  if(!playerStart) throw new Error("Нет 'P' в уровне.");
+  if(!doorPos) throw new Error("Нет 'D' в уровне.");
+
+  // Письмо будет стоять "за дверью" (рядом справа от двери, если возможно)
+  letterPos = [doorPos[0] + 1, doorPos[1]];
 }
 
-function resetNewEntry(){
-  // Каждый новый вход: рандомим сердечки и сбрасываем прогресс
+function newEntryStart(){
+  // Новый вход: заново рандомим сердечки и сбрасываем прогресс
   collected = new Set();
   hearts = new Set();
-  const cells = emptyCells.filter(c => !(c[0]===playerStart[0] && c[1]===playerStart[1]));
-  shuffle(cells, true);
+
+  // Выбираем клетки для сердечек: не стены, не блоки, не дверь, не старт, не письмо
+  const candidates = [];
+  for(let y=0;y<LEVEL.length;y++){
+    for(let x=0;x<LEVEL[0].length;x++){
+      const key = `${x},${y}`;
+      const isSolid = walls.has(key) || blocks.has(key);
+      const isBad = (x===playerStart[0] && y===playerStart[1]) ||
+                    (x===doorPos[0] && y===doorPos[1]) ||
+                    (x===letterPos[0] && y===letterPos[1]);
+      if(!isSolid && !isBad) candidates.push([x,y]);
+    }
+  }
+  shuffle(candidates, true);
   for(let i=0;i<heartCount;i++){
-    hearts.add(`${cells[i][0]},${cells[i][1]}`);
+    hearts.add(`${candidates[i][0]},${candidates[i][1]}`);
   }
 
   player.x = playerStart[0];
   player.y = playerStart[1];
   player.runningUntil = 0;
 
-  // письмо справа внизу (внутри)
-  letterPos = [LEVEL[0].length - 3, LEVEL.length - 2];
-
   startMillis = millis();
+}
+
+function logLine(msg){
+  const el = document.getElementById("consoleLog");
+  if(!el) return;
+  const now = new Date();
+  const t = now.toLocaleTimeString().slice(0, 8);
+  el.textContent += `[${t}] ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
 }
 
 function isWall(x,y){
   return walls.has(`${x},${y}`);
+}
+function isBlock(x,y){
+  return blocks.has(`${x},${y}`);
+}
+function doorClosed(){
+  return collected.size < heartCount; // дверь закрыта пока не собраны все
+}
+function isDoor(x,y){
+  return x===doorPos[0] && y===doorPos[1];
+}
+
+function canMoveTo(x,y){
+  // границы
+  if(x<0 || y<0 || x>=LEVEL[0].length || y>=LEVEL.length) return false;
+  if(isWall(x,y) || isBlock(x,y)) return false;
+  if(isDoor(x,y) && doorClosed()) return false; // закрытая дверь — препятствие
+  return true;
 }
 
 function markMoved(){
   player.runningUntil = millis() + 220;
 }
 
+function tryMove(dx,dy){
+  if(state !== "game") return;
+  const nx = player.x + dx;
+  const ny = player.y + dy;
+  if(canMoveTo(nx,ny)){
+    player.x = nx; player.y = ny;
+    markMoved();
+
+    const key = `${player.x},${player.y}`;
+    if(hearts.has(key) && !collected.has(key)){
+      collected.add(key);
+      logLine(`Сердечко найдено! (${collected.size}/${heartCount})`);
+      if(collected.size === heartCount){
+        logLine("Все сердечки собраны! Дверь открылась ❤️");
+      }
+    }
+  } else {
+    logLine("Туда нельзя: препятствие/стена/закрытая дверь.");
+  }
+}
+
+function handleConsoleCommand(cmdRaw){
+  const cmd = cmdRaw.trim().toLowerCase();
+  if(!cmd) return;
+
+  logLine(`> ${cmdRaw}`);
+
+  // команды меню
+  if(cmd === "menu" || cmd === "r"){
+    state = "welcome";
+    logLine("Возврат в меню. Нажмите ENTER/SPACE, чтобы начать заново.");
+    return;
+  }
+
+  if(state === "welcome"){
+    if(cmd === "start" || cmd === "enter" || cmd === "space" || cmd === "go"){
+      state = "game";
+      newEntryStart();
+      logLine("Игра началась. Собери сердечки, открой дверь и письмо.");
+      return;
+    }
+    // подсказка
+    logLine("Вы сейчас в меню. Команда: start");
+    return;
+  }
+
+  if(state === "letter"){
+    if(cmd === "menu" || cmd === "r"){
+      state = "welcome";
+      return;
+    }
+    logLine("Письмо уже открыто. Нажмите MENU/R чтобы вернуться.");
+    return;
+  }
+
+  // open / e
+  if(cmd === "open" || cmd === "e"){
+    if(collected.size === heartCount &&
+       player.x === letterPos[0] && player.y === letterPos[1]){
+      state = "letter";
+      logLine("Письмо открыто 💌");
+    } else {
+      logLine("Чтобы открыть: собери все сердечки и встань на клетку письма (за дверью).");
+    }
+    return;
+  }
+
+  // single-step movement
+  const single = {
+    "up": [0,-1], "w":[0,-1],
+    "down":[0,1], "s":[0,1],
+    "left":[-1,0], "a":[-1,0],
+    "right":[1,0], "d":[1,0],
+  };
+  if(single[cmd]){
+    const [dx,dy] = single[cmd];
+    tryMove(dx,dy);
+    return;
+  }
+
+  // go right 3
+  // go <dir> <n>
+  const parts = cmd.split(/\s+/);
+  if(parts[0] === "go" && parts.length >= 3){
+    const dir = parts[1];
+    const n = parseInt(parts[2], 10);
+    if(!Number.isFinite(n) || n <= 0 || n > 50){
+      logLine("Пример: go right 3 (число 1..50)");
+      return;
+    }
+    if(!single[dir]){
+      logLine("Направления: up/down/left/right");
+      return;
+    }
+    const [dx,dy] = single[dir];
+    for(let i=0;i<n;i++){
+      tryMove(dx,dy);
+    }
+    return;
+  }
+
+  logLine("Неизвестная команда. Примеры: up, go right 3, open, menu");
+}
+
+function keyPressed(){
+  if(keyCode === ESCAPE) return;
+
+  // старт из welcome
+  if(state === "welcome"){
+    if(keyCode === ENTER || key === " "){
+      state = "game";
+      newEntryStart();
+      logLine("Игра началась. Собери сердечки, открой дверь и письмо.");
+    }
+    return;
+  }
+
+  if(key === "r" || key === "R"){
+    state = "welcome";
+    logLine("Возврат в меню. Нажмите ENTER/SPACE, чтобы начать заново.");
+    return;
+  }
+
+  if(state !== "game") return;
+
+  // движение
+  if(keyCode === LEFT_ARROW || key === "a" || key === "A") tryMove(-1,0);
+  if(keyCode === RIGHT_ARROW || key === "d" || key === "D") tryMove(1,0);
+  if(keyCode === UP_ARROW || key === "w" || key === "W") tryMove(0,-1);
+  if(keyCode === DOWN_ARROW || key === "s" || key === "S") tryMove(0,1);
+
+  // открыть письмо
+  if(key === "e" || key === "E"){
+    handleConsoleCommand("open");
+  }
+}
+
 function draw(){
   background(...BG);
 
-  // фоновые точки
+  // мерцающие звёзды
   noStroke();
-  for(let i=0;i<120;i++){
-    const sx = (i*53) % width;
-    const sy = (i*97) % (height-HUD_H);
-    const tw = 210 + 30 * sin((millis()*0.002) + i);
+  for(let i=0;i<stars.length;i++){
+    const sx = stars[i].x * width;
+    const sy = stars[i].y * (height - HUD_H);
+    const tw = 210 + 30 * sin((millis()*0.002) + stars[i].phase);
     fill(tw, tw-10, tw, 255);
-    circle(sx, sy, (i%2)+1);
+    circle(sx, sy, stars[i].r);
   }
 
   if(state === "welcome"){
@@ -125,26 +359,122 @@ function draw(){
   }
 
   drawLevel();
+  drawHUD();
 
   if(state === "game"){
-    drawHUD();
-    checkWin();
+    drawHints();
   }
 
   if(state === "letter"){
-    drawHUD();
     drawLetterOverlay();
   }
 }
 
+function drawWelcome(){
+  fill(...TEXT);
+  textSize(34);
+  text("Добро пожаловать!", 20, 54);
+
+  // Большой персонаж справа
+  const cardX = width - 320;
+  const cardY = 70;
+  const cardW = 300;
+  const cardH = 300;
+
+  fill(255,245,250);
+  stroke(...LETTER_EDGE);
+  strokeWeight(2);
+  rect(cardX, cardY, cardW, cardH, 22);
+  noStroke();
+
+  imageMode(CENTER);
+  image(imgChar2, cardX + cardW/2, cardY + cardH/2, 250, 250);
+  imageMode(CORNER);
+
+  // пузырь слева
+  const bubbleX = 20;
+  const bubbleY = 90;
+  const bubbleW = width - 360;
+  const bubbleH = 240;
+
+  fill(255,245,250);
+  stroke(...LETTER_EDGE);
+  strokeWeight(2);
+  rect(bubbleX, bubbleY, bubbleW, bubbleH, 22);
+  triangle(bubbleX + bubbleW - 30, bubbleY + bubbleH - 10,
+           bubbleX + bubbleW - 10, bubbleY + bubbleH - 45,
+           cardX + 40, cardY + 210);
+  noStroke();
+
+  fill(...TEXT);
+  textSize(18);
+  let y = bubbleY + 30;
+  y = drawWrapped(GREETING_TEXT, bubbleX + 18, y, bubbleW - 36, 24);
+  y += 10;
+  drawWrapped(FROM_ME_TEXT, bubbleX + 18, y, bubbleW - 36, 24);
+
+  fill(...TEXT);
+  textSize(16);
+  text("ENTER/SPACE — начать  |  или команда в консоли: start", 20, height - 22);
+}
+
+function drawWrapped(str, x, y, maxW, lineH){
+  const words = str.split(" ");
+  let cur = "";
+  for(const w of words){
+    const test = cur ? (cur + " " + w) : w;
+    if(textWidth(test) <= maxW) cur = test;
+    else {
+      text(cur, x, y);
+      y += lineH;
+      cur = w;
+    }
+  }
+  if(cur){
+    text(cur, x, y);
+    y += lineH;
+  }
+  return y;
+}
+
 function drawLevel(){
+  const rows = LEVEL.length;
+  const cols = LEVEL[0].length;
+
   // стены
+  noStroke();
   for(const key of walls){
     const [x,y] = key.split(",").map(Number);
-    const px = x*TILE, py = y*TILE;
     fill(...WALL);
-    rect(px, py, TILE, TILE, 12);
+    rect(x*TILE, y*TILE, TILE, TILE, 12);
   }
+
+  // блоки препятствий X
+  for(const key of blocks){
+    const [x,y] = key.split(",").map(Number);
+    fill(255, 205, 225);
+    rect(x*TILE+3, y*TILE+3, TILE-6, TILE-6, 10);
+    fill(255, 185, 210);
+    rect(x*TILE+7, y*TILE+7, TILE-14, TILE-14, 10);
+  }
+
+  // дверь
+  const [dx,dy] = doorPos;
+  const doorX = dx*TILE, doorY = dy*TILE;
+  fill(...DOOR_FILL);
+  rect(doorX+4, doorY+4, TILE-8, TILE-8, 12);
+  stroke(...DOOR_LOCK);
+  strokeWeight(2);
+  if(doorClosed()){
+    // замочек
+    line(doorX + TILE/2, doorY + 10, doorX + TILE/2, doorY + TILE - 10);
+    circle(doorX + TILE/2, doorY + TILE/2, 10);
+  } else {
+    // открыта — рисуем "проход"
+    line(doorX + 10, doorY + 10, doorX + TILE - 10, doorY + TILE - 10);
+    line(doorX + TILE - 10, doorY + 10, doorX + 10, doorY + TILE - 10);
+  }
+  noStroke();
 
   // сердечки
   for(const key of hearts){
@@ -153,8 +483,8 @@ function drawLevel(){
     drawHeart(x,y);
   }
 
-  // письмо если собрано всё
-  if(collected.size === heartCount){
+  // письмо (за дверью) появляется, когда дверь открыта (все сердечки)
+  if(!doorClosed()){
     drawLetter(letterPos[0], letterPos[1]);
   }
 
@@ -163,20 +493,20 @@ function drawLevel(){
 }
 
 function drawPlayer(){
-  const px = player.x*TILE + TILE/2;
-  const py = player.y*TILE + TILE/2;
-
-  // тень
-  fill(0,0,0,40);
-  ellipse(px, py + TILE*0.35, TILE*0.7, TILE*0.22);
-
   const running = millis() < player.runningUntil;
   const img = running ? imgRun : imgIdle;
 
-  // крупнее клетки
-  const size = TILE*1.55;
+  const cx = player.x*TILE + TILE/2;
+  const cy = player.y*TILE + TILE/2;
+
+  // тень
+  fill(0,0,0,40);
+  ellipse(cx, cy + TILE*0.35, TILE*0.7, TILE*0.22);
+
+  // персонаж больше клетки
+  const size = TILE * 1.55;
   imageMode(CENTER);
-  image(img, px, py, size, size);
+  image(img, cx, cy, size, size);
   imageMode(CORNER);
 }
 
@@ -221,26 +551,23 @@ function drawHUD(){
 
   fill(...TEXT);
   textSize(18);
-
   const elapsed = ((millis()-startMillis)/1000).toFixed(1);
-  text(`Собрано: ${collected.size}/${heartCount}`, 14, hudY+28);
-  text(`Время: ${elapsed}с`, 200, hudY+28);
-  text(`WASD/стрелки • E — письмо • R — в меню`, 340, hudY+28);
+  text(`Собрано: ${collected.size}/${heartCount}`, 12, hudY+28);
+  text(`Время: ${elapsed}с`, 190, hudY+28);
+
+  let hint = doorClosed()
+    ? "Собери все сердечки, чтобы открыть дверь"
+    : "Дверь открыта — иди к письму и нажми E/OPEN";
+  text(hint, 330, hudY+28);
 }
 
-function checkWin(){
-  // сбор сердечек
-  const key = `${player.x},${player.y}`;
-  if(hearts.has(key)) collected.add(key);
-
-  // открыть письмо
-  if(collected.size === heartCount){
-    // подсказка
-    fill(...TEXT);
-    textSize(28);
-    text("Ты собрал(а) все сердечки 💗", 14, 40);
-    textSize(18);
-    text("Подойди к письму и нажми E, чтобы открыть", 14, 70);
+function drawHints(){
+  fill(...TEXT);
+  textSize(18);
+  if(doorClosed()){
+    text("Цель: собери сердечки → дверь откроется → дойди до письма", 12, 22);
+  } else {
+    text("Дверь открыта! Подойди к письму (за дверью) и нажми E/OPEN", 12, 22);
   }
 }
 
@@ -252,7 +579,7 @@ function drawLetterOverlay(){
   textSize(34);
   text("Для тебя 💌", width/2-90, 120);
 
-  const boxX = 110, boxY = 160, boxW = width-220, boxH = 170;
+  const boxX = 60, boxY = 160, boxW = width-120, boxH = 190;
   fill(255,245,250);
   stroke(...LETTER_EDGE);
   strokeWeight(2);
@@ -261,112 +588,9 @@ function drawLetterOverlay(){
 
   fill(...TEXT);
   textSize(18);
-  const lines = wrapForP5(WISH_TEXT, boxW-40);
-  let y = boxY + 32;
-  for(const line of lines.slice(0,6)){
-    text(line, boxX+20, y);
-    y += 26;
-  }
+  let y = boxY + 34;
+  y = drawWrapped(WISH_TEXT, boxX + 18, y, boxW - 36, 26);
 
-  text("Нажми R, чтобы вернуться в главное меню", width/2-220, 365);
-}
-
-function drawWelcome(){
-  // большой персонаж справа
-  fill(255,245,250);
-  stroke(...LETTER_EDGE);
-  strokeWeight(2);
-  rect(width-320, 90, 280, 280, 22);
-  noStroke();
-
-  imageMode(CENTER);
-  image(imgChar2, width-180, 230, 240, 240);
-  imageMode(CORNER);
-
-  // пузырь
-  fill(255,245,250);
-  stroke(...LETTER_EDGE);
-  strokeWeight(2);
-  rect(40, 110, width-400, 240, 22);
-  // хвост
-  triangle(width-360, 320, width-330, 280, width-250, 300);
-  noStroke();
-
-  fill(...TEXT);
-  textSize(34);
-  text("Добро пожаловать!", 40, 70);
-
-  textSize(18);
-  let y = 145;
-  for(const line of wrapForP5(GREETING_TEXT, width-440)){
-    text(line, 60, y); y += 26;
-  }
-  y += 10;
-  for(const line of wrapForP5(FROM_ME_TEXT, width-440)){
-    text(line, 60, y); y += 26;
-  }
-
-  text("ENTER или SPACE — начать игру", 40, height-48);
-  text("ESC — выход", 40, height-22);
-}
-
-function wrapForP5(txt, maxW){
-  const words = txt.split(" ");
-  let lines = [];
-  let cur = "";
-  for(const w of words){
-    const test = cur ? (cur + " " + w) : w;
-    if(textWidth(test) <= maxW) cur = test;
-    else { if(cur) lines.push(cur); cur = w; }
-  }
-  if(cur) lines.push(cur);
-  return lines;
-}
-
-function keyPressed(){
-  if(keyCode === ESCAPE){
-    // браузер не всегда даёт закрыть вкладку, просто ничего
-    return;
-  }
-
-  if(state === "welcome"){
-    if(keyCode === ENTER || key === " "){
-      state = "game";
-      resetNewEntry(); // новый вход = новая расстановка
-    }
-    return;
-  }
-
-  if(key === "r" || key === "R"){
-    // R = вернуться в меню, и при следующем старте будет новый расклад
-    state = "welcome";
-    return;
-  }
-
-  if(state === "letter"){
-    return;
-  }
-
-  // Движение
-  let dx=0, dy=0;
-  if(keyCode === LEFT_ARROW || key === "a" || key === "A") dx = -1;
-  if(keyCode === RIGHT_ARROW || key === "d" || key === "D") dx = 1;
-  if(keyCode === UP_ARROW || key === "w" || key === "W") dy = -1;
-  if(keyCode === DOWN_ARROW || key === "s" || key === "S") dy = 1;
-
-  if(dx || dy){
-    const nx = player.x + dx;
-    const ny = player.y + dy;
-    if(!isWall(nx,ny)){
-      player.x = nx; player.y = ny;
-      markMoved();
-    }
-  }
-
-  // Открыть письмо
-  if((key === "e" || key === "E") && collected.size === heartCount){
-    if(player.x === letterPos[0] && player.y === letterPos[1]){
-      state = "letter";
-    }
-  }
+  textSize(16);
+  text("Команда: menu  |  или клавиша R", boxX + 18, boxY + boxH - 18);
 }
