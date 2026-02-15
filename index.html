@@ -6,174 +6,99 @@
   <title>Valentine Game</title>
   <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
 
-  <style>
+<style>
+  :root {
+    --bg: #fff0f7;
+    --panel: rgba(255,245,250,0.92);
+    --border: #a06e87;
+    --text: #78465f;
+    --btn: rgba(255, 225, 238, 0.95);
+    --btn2: rgba(255, 205, 230, 0.95);
+
+    /* ✅ Адаптивные размеры кнопок */
+    --btnSize: clamp(40px, 10vw, 54px);       /* стрелки */
+    --btnGap:  clamp(6px,  1.6vw, 10px);      /* расстояние */
+    --wideW:   clamp(120px, 34vw, 160px);     /* OPEN/MENU */
+    --wideH:   clamp(40px, 10vw, 54px);       /* высота wide */
+    --pad:     clamp(8px,  2.2vw, 12px);      /* отступы панели */
+  }
+
+  #mobileControls {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    pointer-events: none;
+  }
+
+  .pad, .actions {
+    pointer-events: auto;
+    background: var(--panel);
+    border: 2px solid var(--border);
+    border-radius: 18px;
+    padding: var(--pad);
+    display: grid;
+    gap: 8px;
+    align-content: center;
+    justify-items: center;
+  }
+
+  .dpad {
+    display: grid;
+    grid-template-columns: var(--btnSize) var(--btnSize) var(--btnSize);
+    grid-template-rows:    var(--btnSize) var(--btnSize) var(--btnSize);
+    gap: var(--btnGap);
+  }
+
+  .btn {
+    width: var(--btnSize);
+    height: var(--btnSize);
+    border-radius: 14px;
+    border: 2px solid rgba(160,110,135,0.35);
+    background: var(--btn);
+    color: var(--text);
+    font-size: clamp(14px, 3.6vw, 18px); /* ✅ адаптивный размер символа */
+    font-weight: bold;
+    display: grid;
+    place-items: center;
+    user-select: none;
+    touch-action: manipulation;
+  }
+
+  .actions .btnWide {
+    width: var(--wideW);
+    height: var(--wideH);
+    border-radius: 14px;
+    border: 2px solid rgba(160,110,135,0.35);
+    background: var(--btn2);
+    color: var(--text);
+    font-size: clamp(12px, 3.2vw, 16px); /* ✅ адаптивный текст */
+    font-weight: bold;
+    display: grid;
+    place-items: center;
+    user-select: none;
+    touch-action: manipulation;
+  }
+
+  /* ✅ На очень маленьких экранах (iPhone SE и т.п.) ещё чуть уменьшим */
+  @media (max-width: 360px) {
     :root {
-      --bg: #fff0f7;
-      --panel: rgba(255,245,250,0.92);
-      --border: #a06e87;
-      --text: #78465f;
-      --btn: rgba(255, 225, 238, 0.95);
-      --btn2: rgba(255, 205, 230, 0.95);
+      --btnSize: clamp(36px, 10vw, 44px);
+      --wideW:   clamp(110px, 36vw, 140px);
+      --wideH:   clamp(36px, 10vw, 44px);
     }
+  }
 
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: var(--bg);
-      font-family: Arial, sans-serif;
-      height: 100%;
-      overflow: hidden;
-    }
+  /* Hide mobile controls on desktop-ish widths */
+  @media (min-width: 900px) {
+    #mobileControls { display: none; }
+  }
+</style>
 
-    #wrap {
-      position: fixed;
-      inset: 0;
-      display: grid;
-      grid-template-rows: 1fr auto;
-    }
-
-    /* Canvas container */
-    #game {
-      position: relative;
-      width: 100%;
-      height: 100%;
-      display: grid;
-      place-items: center;
-      padding: 8px;
-      box-sizing: border-box;
-    }
-
-    /* Console panel */
-    #consolePanel {
-      width: min(980px, calc(100vw - 16px));
-      background: var(--panel);
-      border: 2px solid var(--border);
-      border-radius: 16px;
-      margin: 8px auto;
-      box-sizing: border-box;
-      padding: 10px;
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 8px;
-    }
-
-    #consoleHeader {
-      color: var(--text);
-      font-weight: bold;
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-      font-size: 14px;
-    }
-
-    #consoleLog {
-      height: 90px;
-      overflow: auto;
-      background: rgba(255,255,255,0.7);
-      border: 1px solid rgba(160,110,135,0.35);
-      border-radius: 12px;
-      padding: 8px;
-      color: var(--text);
-      font-size: 13px;
-      line-height: 1.35;
-      white-space: pre-wrap;
-    }
-
-    #consoleRow {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 8px;
-      align-items: center;
-    }
-
-    #consoleInput {
-      width: 100%;
-      font-size: 16px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 2px solid rgba(160,110,135,0.35);
-      outline: none;
-      box-sizing: border-box;
-    }
-
-    #sendBtn {
-      padding: 10px 14px;
-      border-radius: 12px;
-      border: 2px solid rgba(160,110,135,0.35);
-      background: var(--btn2);
-      color: var(--text);
-      font-weight: bold;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    /* Mobile controls */
-    #mobileControls {
-      position: absolute;
-      inset: auto 12px 12px 12px;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      pointer-events: none; /* enable only buttons */
-    }
-
-    .pad, .actions {
-      pointer-events: auto;
-      background: var(--panel);
-      border: 2px solid var(--border);
-      border-radius: 18px;
-      padding: 10px;
-      display: grid;
-      gap: 8px;
-      align-content: center;
-      justify-items: center;
-    }
-
-    .dpad {
-      display: grid;
-      grid-template-columns: 56px 56px 56px;
-      grid-template-rows: 56px 56px 56px;
-      gap: 8px;
-    }
-
-    .btn {
-      width: 56px;
-      height: 56px;
-      border-radius: 16px;
-      border: 2px solid rgba(160,110,135,0.35);
-      background: var(--btn);
-      color: var(--text);
-      font-size: 18px;
-      font-weight: bold;
-      display: grid;
-      place-items: center;
-      user-select: none;
-      touch-action: manipulation;
-    }
-
-    .btn:active { transform: scale(0.98); }
-
-    .actions .btnWide {
-      width: 140px;
-      height: 56px;
-      border-radius: 16px;
-      border: 2px solid rgba(160,110,135,0.35);
-      background: var(--btn2);
-      color: var(--text);
-      font-size: 16px;
-      font-weight: bold;
-      display: grid;
-      place-items: center;
-      user-select: none;
-      touch-action: manipulation;
-    }
-
-    /* Hide mobile controls on desktop-ish widths */
-    @media (min-width: 900px) {
-      #mobileControls { display: none; }
-    }
-  </style>
+  
 </head>
 
 <body>
@@ -253,3 +178,4 @@
   </script>
 </body>
 </html>
+
